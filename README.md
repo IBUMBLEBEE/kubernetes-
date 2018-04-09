@@ -67,7 +67,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 
     或
     ```
-    tee /etc/yum.repos.d/docker.repo <<-'EOF'
+    tee /etc/yum.repos.d/docker.repo << 'EOF'
     [dockerrepo]
     name=Docker Repository
     baseurl=https://yum.dockerproject.org/repo/main/centos/7/
