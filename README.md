@@ -75,13 +75,15 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     gpgcheck=1
     gpgkey=https://yum.dockerproject.org/gpg
     EOF
+
+    yum makecache
     ```
     docker 正式安装：
     ```
-    yum install https://yum.dockerproject.org/repo/main/centos/7/Packages/docker-engine-1.12.6-1.el7.centos.x86_64.rpm
-    yum install -y https://yum.dockerproject.org/repo/main/centos/7/Packages/docker-engine-selinux-1.12.6-1.el7.centos.noarch.rpm
+    yum install -y docker-engine-1.12.6
+    yum install -y docker-engine-selinux-1.12.6
+    systemctl start docker.service
     systemctl enable docker.service
-    systemctl restart docker.service
     ```
     **小提示：**
     ```
