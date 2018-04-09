@@ -114,13 +114,13 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 5. 安装etcd和cfssl
     ```
     cd /usr/local/bin/
-    wget http://192.168.233.134/docker/k8s/etcd-3.2.11/etcd
-    wget http://192.168.233.134/docker/k8s/etcd-3.2.11/etcdctl
+    wget http://192.168.233.134/docker/etcd/etcd
+    wget http://192.168.233.134/docker/etcd/etcdctl
     chmod a+x etcd*
 
-    wget http://192.168.174.130/docker/ssl/cfssl
-    wgethttp://192.168.174.130/docker/ssl/cfssljson
-    wget http://192.168.174.130/docker/ssl/cfssl-certinfo
+    wget http://192.168.233.134/docker/ssl/cfssl
+    wget http://192.168.233.134/docker/ssl/cfssljson
+    wget http://192.168.233.134/docker/ssl/cfssl-certinfo
     chmod a+x  cfssl*
     ```
 
@@ -149,9 +149,8 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
         exit 0
     fi
     EOF
-    chmod +x check_apiserver.sh
-    cd /etc/keepalived/
-    >keepalived.conf
+    chmod +x /etc/keepalived/check_apiserver.sh
+    >/etc/keepalived/keepalived.conf
     systemctl enable keepalived && systemctl restart keepalived
     ```
 
@@ -164,7 +163,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
     config.json 文件
     ```
-    cat config.json << EOF>
+    cat << EOF> config.json
     {
       "signing": {
             "default": {
@@ -187,7 +186,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
     创建car.json文件
     ```
-    cat >csr.json  <<EOF
+    cat <<EOF > csr.json
     {
       "CN":  "kubernetes",
       "key": {
