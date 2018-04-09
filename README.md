@@ -80,8 +80,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
     docker 正式安装：
     ```
-    yum install -y docker-engine-1.12.6
-    yum install -y docker-engine-selinux-1.12.6
+    yum install -y docker-engine-1.12.6  docker-engine-selinux-1.12.6
     systemctl start docker.service
     systemctl enable docker.service
     ```
