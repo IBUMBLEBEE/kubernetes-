@@ -43,7 +43,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 * 一个Apache web服务器，用作离线文件的存储，便于脚本的调用。如 http://example.com，这里未设置HTTPS。如果需要，请自行配置，并在下面将HTTP换成https。
 
 ### kubernetes master 部署
-**一、 在所有的master服务器上部署docker并对服务器做相应配置**
+#### 一、 在所有的master服务器上部署docker并对服务器做相应配置
 1. 关闭防火墙和selinux
     ```
     systemctl stop firewalld
@@ -84,7 +84,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     systemctl start docker.service
     systemctl enable docker.service
     ```
-    **小提示：**
+    **小提示（设置阿里云镜像加速器）**
     ```
     由于下载外网镜像时速度过慢的问题，可以使用阿里云的镜像加速器服务。
     使用 systemctl enable docker (在使用docker-engine时生效) 启动后，在配置文件/etc/systemd/system/multi-user.target.wants/docker.service ExecStart=行后添加镜像加速地址（该地址可以在注册或者是使用阿里云账号登陆之后获得docker镜像加速地址）如：
@@ -155,6 +155,84 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     systemctl enable keepalived && systemctl restart keepalived
     ```
 
+#### 二、创建验证
+1. 创建CA证书配置，生成CA证书和私钥
+    先用cfssl命令生成包含默认配置的config.json和csr.json文件
+    ```
+    mkdir /opt/ssl
+    cd /opt/ssl
+    ```
+    config.json 文件
+    ```
+    cat config.json << EOF>
+    {
+      "signing": {
+            "default": {
+                  "expiry":  "87600h"    
+            },
+            "profiles": {
+                  "kubernetes": {
+                        "usages": [
+                                "signing",
+                                "key encipherment",
+                                "server auth",
+                                "client auth"        
+                        ],
+                        "expiry":  "87600h"      
+                    }    
+            }  
+        }
+    }
+    EOF
+    ```
+    创建car.json文件
+    ```
+    cat >csr.json  <<'EOF'
+    {
+      "CN":  "kubernetes",
+      "key": {
+            "algo":  "rsa",
+            "size":  2048  
+        },
+      "names": [
+            {
+                  "C":  "CN",
+                  "ST":  "ShenZhen",
+                  "L":  "ShenZhen",
+                  "O":  "k8s",
+                  "OU":  "System"    
+            }  
+        ]
+    }
+    EOF
+    ```
 
-
+2. 创建ETCD证书配置
+    在/opt/ssl下添加文件etcd-csr.json，内容如下：
+    ```
+    cat etcd-csr.json<<EOF>
+    {
+      "CN":  "etcd",
+      "hosts": [
+            "127.0.0.1",
+            "172.30.11.151",
+            "172.30.11.152",
+            "172.30.11.153"  
+    ],
+      "key": {
+            "algo":  "rsa",
+            "size":  2048  
+    },
+      "names": [
+            {
+                  "C":  "CN",
+                  "ST":  "ShenZhen",
+                  "L":  "ShenZhen",
+                  "O":  "k8s",
+                  "OU":  "System"    
+        }  
+    ]
+}
+EOF
+    ```
 
