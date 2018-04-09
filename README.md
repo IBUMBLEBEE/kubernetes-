@@ -46,8 +46,8 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 **一、 在所有的master服务器上部署docker并对服务器做相应配置**
 1. 关闭防火墙和selinux
     ```
-    systemctl stop firewalld.serivce
-    systemctl disable firewall.service
+    systemctl stop firewalld
+    systemctl disable firewalld
     sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
     setenforce 0
     ```
