@@ -114,8 +114,8 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 5. 安装etcd和cfssl
     ```
     cd /usr/local/bin/
-    wget http://192.168.174.130/docker/k8s/etcd-3.2.11/etcd
-    wget http://192.168.174.130/docker/k8s/etcd-3.2.11/etcdctl
+    wget http://192.168.233.134/docker/k8s/etcd-3.2.11/etcd
+    wget http://192.168.233.134/docker/k8s/etcd-3.2.11/etcdctl
     chmod a+x etcd*
 
     wget http://192.168.174.130/docker/ssl/cfssl
@@ -187,7 +187,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
     创建car.json文件
     ```
-    cat >csr.json  <<'EOF'
+    cat >csr.json  <<EOF
     {
       "CN":  "kubernetes",
       "key": {
