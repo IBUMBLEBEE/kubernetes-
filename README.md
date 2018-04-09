@@ -209,14 +209,14 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 2. 创建ETCD证书配置
     在/opt/ssl下添加文件etcd-csr.json，内容如下：
     ```
-    cat etcd-csr.json<<EOF>
+    cat <<EOF> etcd-csr.json
     {
       "CN":  "etcd",
       "hosts": [
             "127.0.0.1",
-            "172.30.11.151",
-            "172.30.11.152",
-            "172.30.11.153"  
+            "192.168.233.128",
+            "192.168.233.129",
+            "192.168.233.130"  
     ],
       "key": {
             "algo":  "rsa",
@@ -231,7 +231,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
                   "OU":  "System"    
         }  
     ]
-}
-EOF
+    }
+    EOF
     ```
 
