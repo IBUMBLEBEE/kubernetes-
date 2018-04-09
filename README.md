@@ -235,3 +235,136 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     EOF
     ```
 
+#### 三、创建ETCD集群
+    在k8s-master-01上
+    ```
+    cat <<EOF> /usr/lib/systemd/system/etcd.service
+	[Unit]
+	Description=Etcd
+	ServerAfter=network.target
+	After=network-online.target
+	Wants=network-online.target
+	Documentation=https://github.com/coreos
+	
+	[Service]
+	Type=notifyWorking
+	Directory=/var/lib/etcd/
+	EnvironmentFile=-/etc/etcd/etcd.conf
+	ExecStart=/usr/local/bin/etcd \
+	--name=etcd01 \
+	--cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
+	--initial-advertise-peer-urls=https://192.168.233.128:2380 \
+	--listen-peer-urls=https://192.168.233.128:2380 \
+	--listen-client-urls=https://192.168.233.128:2379,http://127.0.0.1:2379 \
+	--advertise-client-urls=https://192.168.233.128:2379 \
+	--initial-cluster-token=etcd-cluster-0 \
+	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
+	--initial-cluster-state=new \
+	--data-dir=/var/lib/etcd
+	Restart=on-failure
+	RestartSec=5
+	LimitNOFILE=65536
+	
+	[Install]
+	WantedBy=multi-user.targetHERE
+    EOF
+    ```
+
+    在master-02上：
+    ```
+    mkdir -p /var/lib/etcd
+	cat <<EOF> /usr/lib/systemd/system/etcd.service
+	[Unit]
+	Description=Etcd
+	ServerAfter=network.target
+	After=network-online.target
+	Wants=network-online.target
+	Documentation=https://github.com/coreos
+	
+	[Service]
+	Type=notifyWorking
+	Directory=/var/lib/etcd/
+	EnvironmentFile=-/etc/etcd/etcd.conf
+	ExecStart=/usr/local/bin/etcd \
+	--name=etcd02 \
+	--cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
+	--initial-advertise-peer-urls=https://192.168.233.129:2380 \
+	--listen-peer-urls=https://192.168.233.129:2380 \
+	--listen-client-urls=https://192.168.233.129:2379,http://127.0.0.1:2379 \
+	--advertise-client-urls=https://192.168.233.129:2379 \
+	--initial-cluster-token=etcd-cluster-0 \
+	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
+	--initial-cluster-state=new \
+	--data-dir=/var/lib/etcd
+	Restart=on-failure
+	RestartSec=5
+	LimitNOFILE=65536
+	
+	[Install]
+	WantedBy=multi-user.targetHERE
+    ```
+
+    在master-03上：
+    ```
+    mkdir -p /var/lib/etcd
+	cat <<EOF> /usr/lib/systemd/system/etcd.service
+	[Unit]
+	Description=Etcd
+	ServerAfter=network.target
+	After=network-online.target
+	Wants=network-online.target
+	Documentation=https://github.com/coreos
+	
+	[Service]
+	Type=notifyWorking
+	Directory=/var/lib/etcd/
+	EnvironmentFile=-/etc/etcd/etcd.conf
+	ExecStart=/usr/local/bin/etcd \
+	--name=etcd03 \
+	--cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
+	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
+	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
+	--initial-advertise-peer-urls=https://192.168.233.130:2380 \
+	--listen-peer-urls=https://192.168.233.130:2380 \
+	--listen-client-urls=https://192.168.233.130:2379,http://127.0.0.1:2379 \
+	--advertise-client-urls=https://192.168.233.130:2379 \
+	--initial-cluster-token=etcd-cluster-0 \
+	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
+	--initial-cluster-state=new \
+	--data-dir=/var/lib/etcd
+	Restart=on-failure
+	RestartSec=5
+	LimitNOFILE=65536
+	
+	[Install]
+	WantedBy=multi-user.targetHERE
+    ```
+
+#### 安装kube并初始化
+```
+rpm --import https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+cat <<EOF> /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+
+yum install -y kubelet-1.9.2 kubeadm-1.9.2 kubectl-1.9.2
+```
