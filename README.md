@@ -153,6 +153,13 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     >/etc/keepalived/keepalived.conf
     systemctl enable keepalived && systemctl restart keepalived
     ```
+7. 安装CNI插件
+    ```
+    mkdir -p /opt/cni/bin
+    wget http://192.168.233.134/docker/k8s/cni-amd64-v0.5.2.tgz
+    tar -zxvf cni-amd64-v0.5.2.tgz -C /opt/cni/bin
+    ls /opt/cni/bin
+    ```
 
 #### 二、创建验证
 1. 创建CA证书配置，生成CA证书和私钥
@@ -290,3 +297,8 @@ EOF
 
 yum install -y kubelet-1.9.2 kubeadm-1.9.2 kubectl-1.9.2
 ```
+修改systemd为cgroupfs(为了和docker的group一致)，并设置pause的镜像地址 /etc/systemd/system/kubelet.service.d/10-kubeadm.conf，并新添加一行：
+```
+Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/ibumblebee/pause:3.0
+```
+systemctl daemon-reload && systemctl start kubelet && systemctl enable kubelet
