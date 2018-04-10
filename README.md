@@ -236,124 +236,46 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
 
 #### 三、创建ETCD集群
-    在k8s-master-01上
+    在k8s-master-01~03上
     ```
+    yum install etcd-3.2.11 -y
+    >/etc/etcd/etcd.conf
     cat <<EOF> /usr/lib/systemd/system/etcd.service
-	[Unit]
-	Description=Etcd
-	ServerAfter=network.target
-	After=network-online.target
-	Wants=network-online.target
-	Documentation=https://github.com/coreos
-	
-	[Service]
-	Type=notifyWorking
-	Directory=/var/lib/etcd/
-	EnvironmentFile=-/etc/etcd/etcd.conf
-	ExecStart=/usr/local/bin/etcd \
-	--name=etcd01 \
-	--cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
-	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
-	--initial-advertise-peer-urls=https://192.168.233.128:2380 \
-	--listen-peer-urls=https://192.168.233.128:2380 \
-	--listen-client-urls=https://192.168.233.128:2379,http://127.0.0.1:2379 \
-	--advertise-client-urls=https://192.168.233.128:2379 \
-	--initial-cluster-token=etcd-cluster-0 \
-	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
-	--initial-cluster-state=new \
-	--data-dir=/var/lib/etcd
-	Restart=on-failure
-	RestartSec=5
-	LimitNOFILE=65536
-	
-	[Install]
-	WantedBy=multi-user.targetHERE
+    [Unit]  
+    Description=Etcd Server
+    After=network.target
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=notify
+    WorkingDirectory=/var/lib/etcd/
+    EnvironmentFile=-/etc/etcd/etcd.conf
+    User=root
+    # set GOMAXPROCS to number of processors
+    ExecStart=/bin/bash -c "GOMAXPROCS=$(nproc) /usr/bin/etcd --name=\"${ETCD_NAME}\" --data-dir=\"${ETCD_DATA_DIR}\" --listen-client-urls=\"${ETCD_LISTEN_CLIENT_URLS}\""
+    Restart=on-failure
+    LimitNOFILE=65536
+
+    [Install]
+    WantedBy=multi-user.target
     EOF
     ```
-
-    在master-02上：
+    etcd.conf文件配置
     ```
-    mkdir -p /var/lib/etcd
-	cat <<EOF> /usr/lib/systemd/system/etcd.service
-	[Unit]
-	Description=Etcd
-	ServerAfter=network.target
-	After=network-online.target
-	Wants=network-online.target
-	Documentation=https://github.com/coreos
-	
-	[Service]
-	Type=notifyWorking
-	Directory=/var/lib/etcd/
-	EnvironmentFile=-/etc/etcd/etcd.conf
-	ExecStart=/usr/local/bin/etcd \
-	--name=etcd02 \
-	--cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
-	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
-	--initial-advertise-peer-urls=https://192.168.233.129:2380 \
-	--listen-peer-urls=https://192.168.233.129:2380 \
-	--listen-client-urls=https://192.168.233.129:2379,http://127.0.0.1:2379 \
-	--advertise-client-urls=https://192.168.233.129:2379 \
-	--initial-cluster-token=etcd-cluster-0 \
-	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
-	--initial-cluster-state=new \
-	--data-dir=/var/lib/etcd
-	Restart=on-failure
-	RestartSec=5
-	LimitNOFILE=65536
-	
-	[Install]
-	WantedBy=multi-user.targetHERE
+    ETCD_DATA_DIR="/var/lib/etcd/etcd01"
+    ETCD_LISTEN_PEER_URLS="http://192.168.233.128:2380"
+    ETCD_LISTEN_CLIENT_URLS="http://192.168.233.128:2379,http://127.0.0.1:2379"
+    ETCD_NAME="etcd01"
+    #[Clustering]
+    ETCD_INITIAL_ADVERTISE_PEER_URLS="http://192.168.233.128:2380"
+    ETCD_ADVERTISE_CLIENT_URLS="http://192.168.233.128:2379"
+    ETCD_INITIAL_CLUSTER="etcd01=http://192.168.233.128:2380,etcd02=http://192.168.233.129:2380,etcd03=http://192.168.233.130:2380"
+    ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-0"
+    ETCD_INITIAL_CLUSTER_STATE="new"
     ```
 
-    在master-03上：
-    ```
-    mkdir -p /var/lib/etcd
-	cat <<EOF> /usr/lib/systemd/system/etcd.service
-	[Unit]
-	Description=Etcd
-	ServerAfter=network.target
-	After=network-online.target
-	Wants=network-online.target
-	Documentation=https://github.com/coreos
-	
-	[Service]
-	Type=notifyWorking
-	Directory=/var/lib/etcd/
-	EnvironmentFile=-/etc/etcd/etcd.conf
-	ExecStart=/usr/local/bin/etcd \
-	--name=etcd03 \
-	--cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
-	--peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
-	--trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
-	--peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem\
-	--initial-advertise-peer-urls=https://192.168.233.130:2380 \
-	--listen-peer-urls=https://192.168.233.130:2380 \
-	--listen-client-urls=https://192.168.233.130:2379,http://127.0.0.1:2379 \
-	--advertise-client-urls=https://192.168.233.130:2379 \
-	--initial-cluster-token=etcd-cluster-0 \
-	--initial-cluster=etcd01=https://192.168.233.128:2380,etcd02=https://192.168.233.129:2380,etcd03=https://192.168.233.130:2380\
-	--initial-cluster-state=new \
-	--data-dir=/var/lib/etcd
-	Restart=on-failure
-	RestartSec=5
-	LimitNOFILE=65536
-	
-	[Install]
-	WantedBy=multi-user.targetHERE
-    ```
-
-#### 安装kube并初始化
+#### 四、安装kube并初始化
 ```
 rpm --import https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
 cat <<EOF> /etc/yum.repos.d/kubernetes.repo
