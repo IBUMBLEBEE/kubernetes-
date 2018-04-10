@@ -241,6 +241,94 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     }
     EOF
     ```
+    3. 创建kube-apiserver证书
+        ```
+        cat <<EOF> kubernetes-csr.json
+        {
+        "CN": "kubernetes",
+        "hosts": [
+            "127.0.0.1",
+            "192.168.233.128",
+            "192.168.233.129",
+            "192.168.233.130",
+            "192.168.233.134",
+            "10.221.0.1",
+            "kubernetes",
+            "kubernetes.default",
+            "kubernetes.default.svc",
+            "kubernetes.default.svc.cluster",
+            "kubernetes.default.svc.cluster.local"
+        ],
+        "key": {
+            "algo": "rsa",
+            "size": 2048
+        },
+        "names": [
+            {
+            "C": "CN",
+            "ST": "ShenZhen",
+            "L": "ShenZhen",
+            "O": "k8s",
+            "OU": "System"
+            }
+        ]
+        }
+        EOF
+        ```
+    4. 创建kube-admin证书
+        ```
+        cat <<EOF>admin-csr.json
+        {
+        "CN": "admin",
+        "hosts": [],
+        "key": {
+            "algo": "rsa",
+            "size": 2048
+        },
+        "names": [
+            {
+            "C": "CN",
+            "ST": "ShenZhen",
+            "L": "ShenZhen",
+            "O": "system:masters",
+            "OU": "System"
+            }
+        ]
+        }
+        EOF
+        ```
+    5. 创建kube-proxy证书
+        ```
+        cat <<EOF>kube-proxy-csr.json
+        {
+            "CN": "system:kube-proxy",
+            "hosts": [],
+            "key": {
+                "algo": "rsa",
+                "size": 2048
+            },
+            "names": [
+                {
+                "C": "CN",
+                "ST": "ShenZhen",
+                "L": "ShenZhen",
+                "O": "k8s",
+                "OU": "System"
+                }
+            ]
+        }
+        EOF
+        ```
+    生成证书和秘钥
+    ```
+    cd /opt/ssl
+    cfssl gencert --initca=true csr.json | cfssljson --bare ca
+
+    # 生成证书
+    for targetName in kubernetes admin kube-proxy; do
+          cfssl gencert --ca  ca.pem --ca-key ca-key.pem --config config.json --profile kubernetes $targetName-csr.json | cfssljson --bare $targetName
+    done
+    ```
 
 #### 三、创建ETCD集群
     在k8s-master-01~03上
