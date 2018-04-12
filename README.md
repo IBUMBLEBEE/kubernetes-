@@ -103,12 +103,11 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 
 5. 配置kubernetes 所有节点iptables
     ```
-    cat <<EOF > /etc/sysctl.d/kubernetes.conf
-    net.ipv4.ip_forward = 1
+    cat <<EOF >  /etc/sysctl.d/k8s.conf
     net.bridge.bridge-nf-call-ip6tables = 1
     net.bridge.bridge-nf-call-iptables = 1
     EOF
-    sysctl -p /etc/sysctl.d/kubernetes.conf
+    sysctl --system
     ```
 
 5. 安装etcd和cfssl
@@ -329,6 +328,36 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
           cfssl gencert --ca  ca.pem --ca-key ca-key.pem --config config.json --profile kubernetes $targetName-csr.json | cfssljson --bare $targetName
     done
     ```
+    6. kubelet 证书和私钥，生成高级审核配置文件
+       kubelet 其实也可以手动通过CA来进行签发，但是这只能针对少数机器，毕竟我们在进行证书签发的时候，是需要绑定对应Node的IP的，如果node太多了，加IP就会很幸苦， 所以这里我们使用TLS 认证，由apiserver自动给符合条件的node签发证书，允许节点加入集群。
+
+       **在kubernetes-console生成token并分发发所有的master节点**
+       ```
+        cd /opt/ssl
+        export BOOTSTRAP_TOKEN=$(head -c 16 /dev/urandom | od -An -t x | tr -d ' ')
+        echo "Tokne: ${BOOTSTRAP_TOKEN}"
+        cat > token.csv <<EOF
+        ${BOOTSTRAP_TOKEN},kubelet-bootstrap,10001,"system:kubelet-bootstrap"
+        EOF
+        #生成高级审核配置文件
+        cat >> audit-policy.yaml <<EOF
+        # Log all requests at the Metadata level.
+        apiVersion: audit.k8s.io/v1beta1
+        kind: Policy
+        rules:
+        - level: Metadata
+        EOF
+       ``` 
+    7. 颁发证书
+    ```
+    cd /opt/ssl
+
+    for IP in `seq 151 153`;do
+        ssh root@172.30.11.$IP mkdir -p /etc/kubernetes/ssl
+    scp * root@172.30.11.$IP:/etc/kubernetes/ssl/
+    done
+    ```
+
 
 #### 三、创建ETCD集群
     在k8s-master-01~03上
@@ -390,3 +419,265 @@ yum install -y kubelet-1.9.2 kubeadm-1.9.2 kubectl-1.9.2
 Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/ibumblebee/pause:3.0
 ```
 systemctl daemon-reload && systemctl start kubelet && systemctl enable kubelet
+
+kubelet安装完成后，在启动时会报错。这个没关系，后期会在配置。
+
+#### 五、安装kube-apiserver、kube-proxy、kube-controller-manager、kube-scheduler
+```
+cat <<EOF>/usr/lib/systemd/system/kube-apiserver.service
+[Unit]
+Description=Kubernetes API Server
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=network.target
+[Service]
+User=root
+ExecStart=/usr/local/bin/kube-apiserver \
+  --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota,NodeRestriction \
+  --advertise-address=192.168.233.128 \
+  --allow-privileged=true \
+  --apiserver-count=3 \
+  --audit-policy-file=/etc/kubernetes/ssl/audit-policy.yaml \
+  --audit-log-maxage=30 \
+  --audit-log-maxbackup=3 \
+  --audit-log-maxsize=100 \
+  --audit-log-path=/var/log/kubernetes/ssl/audit.log \
+  --authorization-mode=Node,RBAC \
+  --bind-address=0.0.0.0 \
+  --secure-port=6443 \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+  --enable-swagger-ui=true \
+  --etcd-cafile=/etc/kubernetes/ssl/ca.pem \
+  --etcd-certfile=/etc/kubernetes/ssl/etcd.pem \
+  --etcd-keyfile=/etc/kubernetes/ssl/etcd-key.pem \
+  --etcd-servers=http://192.168.233.128:2379,http://192.168.233.129:2379,http://192.168.233.130:2379 \
+  --event-ttl=1h \
+  --kubelet-https=true \
+  --insecure-bind-address=127.0.0.1 \
+  --insecure-port=8080 \
+  --service-account-key-file=/etc/kubernetes/ssl/ca-key.pem \
+  --service-cluster-ip-range=10.221.0.0/16 \
+  --service-node-port-range=30000-50000 \
+  --tls-cert-file=/etc/kubernetes/ssl/kubernetes.pem \
+  --tls-private-key-file=/etc/kubernetes/ssl/kubernetes-key.pem \
+  --enable-bootstrap-token-auth \
+  --token-auth-file=/etc/kubernetes/ssl/token.csv \
+  --v=2
+Restart=on-failure
+RestartSec=5
+Type=notify
+LimitNOFILE=65536
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+安装kube-controller-manager
+```
+cat <<EOF>/usr/lib/systemd/system/kube-controller-manager.service
+[Unit]
+Description=Kubernetes Controller Manager
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+[Service]
+ExecStart=/usr/local/bin/kube-controller-manager \
+  --address=0.0.0.0 \
+  --master=http://127.0.0.1:8080 \
+  --allocate-node-cidrs=true \
+  --service-cluster-ip-range=10.221.0.0/16 \
+  --cluster-cidr=10.222.0.0/16 \
+  --cluster-name=kubernetes \
+  --cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem \
+  --cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem \
+  --service-account-private-key-file=/etc/kubernetes/ssl/ca-key.pem \
+  --root-ca-file=/etc/kubernetes/ssl/ca.pem \
+  --leader-elect=true \
+  --v=2
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl start kube-controller-manager && systemctl status kube-controller-manager
+```
+安装kube-scheduler
+```
+cat <<EOF> /usr/lib/systemd/system/kube-scheduler.service
+[Unit]
+Description=Kubernetes Scheduler
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+[Service]
+ExecStart=/usr/local/bin/kube-scheduler \
+  --address=0.0.0.0 \
+  --master=http://127.0.0.1:8080 \
+  --leader-elect=true \
+  --v=2
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl start kube-scheduler && systemctl status kube-scheduler
+```
+#### 六、Master HA配置
+目前所谓的kubernetes HA 其实主要是API Server的HA，master上的其他组件，比如kube-controller-manager、kube-scheduler都是通过etcd做选举。而API Server一般有两种方式做HA；一种是多个API Server 做聚合为 VIP，另一种使用nginx反向代理，这里我们采用nginx的方式。
+
+kube-controller-manager、kube-scheduler通过etcd选举，而且与master直接通过127.0.0.1:8443通信，而其他node，则需要在每个node上启动一个nginx，
+每个nginx反代所有apiserver，node上的kubelet、kube-proxy、kubectl连接本地nginx代理端口，当nginx发现无法连接后端时会自动踢掉出问题的apiserver，
+从而实现api server的HA。
+
+**在master上的操作**
+```
+mkdir /etc/nginx
+cd /etc/nginx
+cat <<EOF>/etc/nginx/nginx-default.conf 
+user  nginx;
+worker_processes  1;
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+events {
+    worker_connections  1024;
+}
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log  /var/log/nginx/access.log  main;
+    sendfile        on;
+    
+    keepalive_timeout  65;
+    
+    include /etc/nginx/conf.d/*.conf;
+}
+stream {
+        upstream apiserver {
+            server 192.168.233.128:6443 weight=5 max_fails=3 fail_timeout=30s;
+            server 192.168.233.129:6443 weight=5 max_fails=3 fail_timeout=30s;
+            server 192.168.233.130:6443 weight=5 max_fails=3 fail_timeout=30s;
+        }
+    server {
+        listen 8443;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        proxy_pass apiserver;
+    }
+server {
+        listen 8099;
+        proxy_connect_timeout 1s;
+        proxy_timeout 3s;
+        proxy_pass 127.0.0.1:8089;
+    }
+}
+EOF
+docker run -d -p 8443:8443 \
+--name nginx-lb \
+--restart always \
+-v /etc/nginx/nginx-default.conf:/etc/nginx/nginx.conf \
+daocloud.io/nginx
+```
+
+#### 八、配置keepalived VIP
+在每个master节点上修改/etc/keepalived/keepalived.conf
+
+**naster01**
+```
+cat <<EOF>/etc/keepalived/keepalived.conf 
+! Configuration File for keepalived
+global_defs {
+    router_id LVS_DEVEL
+}
+vrrp_script chk_apiserver {
+    script "/etc/keepalived/check_apiserver.sh"
+    interval 2
+    weight -5
+    fall 3
+    rise 2
+}
+vrrp_instance VI_1 {
+    state MASTER
+    interface ens160
+    mcast_src_ip 192.168.233.128
+    virtual_router_id 99
+    priority 102
+    advert_int 2
+    authentication {
+        auth_type PASS
+        auth_pass zkonl402x1jc1qejpysckmire51xo7qz
+    }
+    virtual_ipaddress {
+        192.168.233.134
+    }
+    track_script {
+       chk_apiserver
+    }
+}
+EOF
+```
+**master02**
+```
+cat <<EOF>/etc/keepalived/keepalived.conf
+! Configuration File for keepalived
+global_defs {
+    router_id LVS_DEVEL
+}
+vrrp_script chk_apiserver {
+    script "/etc/keepalived/check_apiserver.sh"
+    interval 2
+    weight -5
+    fall 3
+    rise 2
+}
+vrrp_instance VI_1 {
+    state BACKUP
+    interface ens160
+    mcast_src_ip 192.168.233.129
+    virtual_router_id 99
+    priority 101
+    advert_int 2
+    authentication {
+        auth_type PASS
+        auth_pass zkonl402x1jc1qejpysckmire51xo7qz
+    }
+    virtual_ipaddress {
+        192.168.233.134
+    }
+    track_script {
+       chk_apiserver
+    }
+}
+EOF
+```
+**master03**
+```
+cat <<EOF>/etc/keepalived/keepalived.conf 
+! Configuration File for keepalived
+global_defs {
+    router_id LVS_DEVEL
+}
+vrrp_script chk_apiserver {
+    script "/etc/keepalived/check_apiserver.sh"
+    interval 2
+    weight -5
+    fall 3
+    rise 2
+}
+vrrp_instance VI_1 {
+    state BACKUP
+    interface ens160
+    mcast_src_ip 192.168.233.130
+    virtual_router_id 99
+    priority 100
+    advert_int 2
+    authentication {
+        auth_type PASS
+        auth_pass zkonl402x1jc1qejpysckmire51xo7qz
+    }
+    virtual_ipaddress {
+        192.168.233.134
+    }
+    track_script {
+       chk_apiserver
+    }
+}
+EOF
+
+```
