@@ -17,6 +17,11 @@ kubeadm 方式可以可以在线安装和离线安装，这里所谓的离线和
     * kubelet 负责维护容器的生命周期，同时也负责Volume（cvi）和网络（CNI）的管理；负责与node上的docker engine打交道；
     * container runtime 负责镜像管理以及pod和容器的真正运行（CRI）；
     * kube-proxy 负责为Service提供cluster内部的服务发现和负载均衡，当前主要通过设置iptables规则实现。
+* kubernetes 非核心组件
+    * CNI  容器网络接口，负责将pod挂载到flannel网络上的。
+    * kube-dns kubernetes域名解析服务
+    * dashboard kubernetes UI页面
+    * heapster 监控组件（结合grafana + influxdb + heapster 另外方案：prometheus）
 
 #### kubernetes 安装前准备
 * 这里使用6个节点的安装方式，即3个master和3个node组成的集群。
@@ -38,8 +43,9 @@ k8s-node-01| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 k8s-node-02| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 
+**温馨提示**
 * 所有虚拟机在同一个内网中
-* 配置一个docker hub仓库，这是使用horbar实现
+* 配置一个docker hub仓库，这是使用horbar实现（在内网中安装kubernetes时，这一步是很重要的一步，请重视）。horbar 在官网有离线安装包，具体的安装步骤请按官方步骤进行。
 * 一个Apache web服务器，用作离线文件的存储，便于脚本的调用。如 http://example.com，这里未设置HTTPS。如果需要，请自行配置，并在下面将HTTP换成https。
 
 ### kubernetes master 部署
@@ -49,6 +55,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     systemctl stop firewalld
     systemctl disable firewalld
     sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+    sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
     setenforce 0
     ```
 2. 安装基础软件
@@ -76,11 +83,11 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     gpgkey=https://yum.dockerproject.org/gpg
     EOF
 
-    yum makecache
+    yum makecache fast
     ```
     docker 正式安装：
     ```
-    yum install -y docker-engine-1.12.6  docker-engine-selinux-1.12.6
+    yum install -y docker-1.12.6
     systemctl start docker.service
     systemctl enable docker.service
     ```
@@ -96,9 +103,9 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
 4. 配置host
     ```
-    echo "192.168.174.132 k8s-master-01" >>/etc/hosts
-    echo "192.168.174.133 k8s-master-02" >>/etc/hosts
-    echo "192.168.174.134 k8s-master-03" >>/etc/hosts
+    echo "192.168.223.160 k8s-master-001" >>/etc/hosts
+    echo "192.168.223.161 k8s-master-002" >>/etc/hosts
+    echo "192.168.223.162 k8s-master-003" >>/etc/hosts
     ```
 
 5. 配置kubernetes 所有节点iptables
@@ -111,19 +118,19 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     ```
 
 5. 安装etcd和cfssl
+    这是内网的web服务器，etcd二进制文件可在GitHub下载，etcd版本可根据kubernetes官网推荐的etcd版本进行选择
     ```
     cd /usr/local/bin/
     wget http://192.168.233.134/docker/etcd/etcd
     wget http://192.168.233.134/docker/etcd/etcdctl
     chmod a+x etcd*
 
-    wget http://192.168.233.134/docker/ssl/cfssl
-    wget http://192.168.233.134/docker/ssl/cfssljson
-    wget http://192.168.233.134/docker/ssl/cfssl-certinfo
-    chmod a+x  cfssl*
+    curl -o /usr/local/bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+    curl -o /usr/local/bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+    chmod +x /usr/local/bin/cfssl*
     ```
 
-6. 配置keepalive
+6. 配置keepalive(这是自定义的，检测apiserver服务的keepalived脚本。kubernetes官网有配置好的，请阅读https://kubernetes.io/docs/setup/independent/high-availability/配置并自行配置)
     ```
     cat <<EOF > /etc/keepalived/check_apiserver.sh 
     #!/bin/bash
@@ -152,16 +159,9 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     >/etc/keepalived/keepalived.conf
     systemctl enable keepalived && systemctl restart keepalived
     ```
-7. 安装CNI插件
-    ```
-    mkdir -p /opt/cni/bin
-    wget http://192.168.233.134/docker/k8s/cni-amd64-v0.5.2.tgz
-    tar -zxvf cni-amd64-v0.5.2.tgz -C /opt/cni/bin
-    ls /opt/cni/bin
-    ```
 
 #### 二、创建验证
-1. 创建CA证书配置，生成CA证书和私钥
+1. 创建CA证书配置，生成CA证书和私钥（该服务器证书一年有效期）
     先用cfssl命令生成包含默认配置的config.json和csr.json文件
     ```
     mkdir /opt/ssl
@@ -212,8 +212,8 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     EOF
     ```
 
-2. 创建ETCD证书配置
-    在/opt/ssl下添加文件etcd-csr.json，内容如下：
+2. 创建ETCD证书配置（etcd秘钥建议不要放在/etc/kubernetes/pki目录下，如果你要精力重新生成etcd秘钥信息）
+    在/opt/ssl下添加文件etcd-csr.json（配置对应的etcd服务器地址），内容如下：
     ```
     cat <<EOF> etcd-csr.json
     {
@@ -240,7 +240,7 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
     }
     EOF
     ```
-    3. 创建kube-apiserver证书
+    3. 创建kube-apiserver证书（添加kubernetes master apiserver节点以及keepalived虚拟IP）
         ```
         cat <<EOF> kubernetes-csr.json
         {
@@ -362,41 +362,39 @@ k8s-node-03| node | kubelet、kube-proxy | 1 core 1GB | 自行规划
 #### 三、创建ETCD集群
     在k8s-master-01~03上
     ```
-    yum install etcd-3.2.11 -y
-    >/etc/etcd/etcd.conf
     cat <<EOF> /usr/lib/systemd/system/etcd.service
-    [Unit]  
+    [Unit]
     Description=Etcd Server
     After=network.target
     After=network-online.target
     Wants=network-online.target
-
+    Documentation=https://github.com/coreos
     [Service]
     Type=notify
     WorkingDirectory=/var/lib/etcd/
     EnvironmentFile=-/etc/etcd/etcd.conf
-    User=root
-    # set GOMAXPROCS to number of processors
-    ExecStart=/bin/bash -c "GOMAXPROCS=$(nproc) /usr/bin/etcd --name=\"${ETCD_NAME}\" --data-dir=\"${ETCD_DATA_DIR}\" --listen-client-urls=\"${ETCD_LISTEN_CLIENT_URLS}\""
+    ExecStart=/usr/local/bin/etcd \
+    --name=etcd01 \
+    --cert-file=/etc/kubernetes/ssl/etcd.pem \
+    --key-file=/etc/kubernetes/ssl/etcd-key.pem \
+    --peer-cert-file=/etc/kubernetes/ssl/etcd.pem \
+    --peer-key-file=/etc/kubernetes/ssl/etcd-key.pem \
+    --trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+    --peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+    --initial-advertise-peer-urls=https://192.168.233.201:2380 \
+    --listen-peer-urls=https://192.168.233.201:2380 \
+    --listen-client-urls=https://192.168.233.201:2379,http://127.0.0.1:2379 \
+    --advertise-client-urls=https://192.168.233.201:2379 \
+    --initial-cluster-token=etcd-cluster-0 \
+    --initial-cluster=etcd01=https://192.168.233.201:2380,etcd02=https://192.168.233.202:2380,etcd03=https://192.168.233.203:2380 \
+    --initial-cluster-state=new \
+    --data-dir=/var/lib/etcd
     Restart=on-failure
+    RestartSec=5
     LimitNOFILE=65536
-
     [Install]
     WantedBy=multi-user.target
     EOF
-    ```
-    etcd.conf文件配置
-    ```
-    ETCD_DATA_DIR="/var/lib/etcd/etcd01"
-    ETCD_LISTEN_PEER_URLS="http://192.168.233.128:2380"
-    ETCD_LISTEN_CLIENT_URLS="http://192.168.233.128:2379,http://127.0.0.1:2379"
-    ETCD_NAME="etcd01"
-    #[Clustering]
-    ETCD_INITIAL_ADVERTISE_PEER_URLS="http://192.168.233.128:2380"
-    ETCD_ADVERTISE_CLIENT_URLS="http://192.168.233.128:2379"
-    ETCD_INITIAL_CLUSTER="etcd01=http://192.168.233.128:2380,etcd02=http://192.168.233.129:2380,etcd03=http://192.168.233.130:2380"
-    ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-0"
-    ETCD_INITIAL_CLUSTER_STATE="new"
     ```
 
 #### 四、安装kube并初始化
@@ -408,114 +406,63 @@ name=Kubernetes
 baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
 enabled=1
 gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+repo_gpgcheck=0
 EOF
 
 yum install -y kubelet-1.9.2 kubeadm-1.9.2 kubectl-1.9.2
 ```
 修改systemd为cgroupfs(为了和docker的group一致)，并设置pause的镜像地址 /etc/systemd/system/kubelet.service.d/10-kubeadm.conf，并新添加一行：
 ```
-Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/ibumblebee/pause:3.0
+Environment="KUBELET_CGROUP_ARGS=--cgroup-driver=cgroupfs"
+Environment="KUBELET_SWAP_ARGS=--fail-swap-on=false"
+Environment="KUBELET_EXTRA_ARGS=--pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/google-containers/pause-amd64:3.0"
 ```
 systemctl daemon-reload && systemctl start kubelet && systemctl enable kubelet
 
 kubelet安装完成后，在启动时会报错。这个没关系，后期会在配置。
 
-#### 五、安装kube-apiserver、kube-proxy、kube-controller-manager、kube-scheduler
+#### 五、使用kubeadm安装kubernetes
+* 请修改etcd集群地址和apiserver节点IP以及VIP地址
+* token是有关于kubernetes在1.5之后的权限验证功能bootstrap权限管理模式
+* imageRepository是镜像下载地址，如果不添加默认是Google镜像仓库，被墙在国内很难下载
+* 在执行kubeadm init --config=config.yaml之前，请注意保存etcd相关的秘钥信息，因为在kubeadm执行失败需要重新执行kubeadm reset时会导致/etc/kubernetes/pki目录清空，导致秘钥丢失
 ```
-cat <<EOF>/usr/lib/systemd/system/kube-apiserver.service
-[Unit]
-Description=Kubernetes API Server
-Documentation=https://github.com/GoogleCloudPlatform/kubernetes
-After=network.target
-[Service]
-User=root
-ExecStart=/usr/local/bin/kube-apiserver \
-  --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota,NodeRestriction \
-  --advertise-address=192.168.233.128 \
-  --allow-privileged=true \
-  --apiserver-count=3 \
-  --audit-policy-file=/etc/kubernetes/ssl/audit-policy.yaml \
-  --audit-log-maxage=30 \
-  --audit-log-maxbackup=3 \
-  --audit-log-maxsize=100 \
-  --audit-log-path=/var/log/kubernetes/ssl/audit.log \
-  --authorization-mode=Node,RBAC \
-  --bind-address=0.0.0.0 \
-  --secure-port=6443 \
-  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
-  --enable-swagger-ui=true \
-  --etcd-cafile=/etc/kubernetes/ssl/ca.pem \
-  --etcd-certfile=/etc/kubernetes/ssl/etcd.pem \
-  --etcd-keyfile=/etc/kubernetes/ssl/etcd-key.pem \
-  --etcd-servers=http://192.168.233.128:2379,http://192.168.233.129:2379,http://192.168.233.130:2379 \
-  --event-ttl=1h \
-  --kubelet-https=true \
-  --insecure-bind-address=127.0.0.1 \
-  --insecure-port=8080 \
-  --service-account-key-file=/etc/kubernetes/ssl/ca-key.pem \
-  --service-cluster-ip-range=10.221.0.0/16 \
-  --service-node-port-range=30000-50000 \
-  --tls-cert-file=/etc/kubernetes/ssl/kubernetes.pem \
-  --tls-private-key-file=/etc/kubernetes/ssl/kubernetes-key.pem \
-  --enable-bootstrap-token-auth \
-  --token-auth-file=/etc/kubernetes/ssl/token.csv \
-  --v=2
-Restart=on-failure
-RestartSec=5
-Type=notify
-LimitNOFILE=65536
-[Install]
-WantedBy=multi-user.target
+cat <<EOF> /etc/kubernetes/config.yaml
+apiVersion: kubeadm.k8s.io/v1alpha1
+kind: MasterConfiguration
+etcd:
+  endpoints:
+  - https://192.168.233.201:2379
+  - https://192.168.233.202:2379
+  - https://192.168.233.203:2379
+  caFile: /etc/kubernetes/ssl/ca.pem
+  certFile: /etc/kubernetes/ssl/etcd.pem
+  keyFile: /etc/kubernetes/ssl/etcd-key.pem
+  dataDir: /var/lib/etcd
+networking:
+  podSubnet: 10.244.0.0/16
+kubernetesVersion: 1.9.2
+api:
+  advertiseAddress: "127.0.0.1"
+token: "b99a00.a144ef80536d4344"
+tokenTTL: "0s"
+apiServerCertSANs:
+- k8s-master-1
+- k8s-master-2
+- k8s-master-3
+- 192.168.233.201
+- 192.168.233.202
+- 192.168.233.203
+- 192.168.233.200
+imageRepository: "192.168.233.168/k8s"
 EOF
+kubeadm init --config=config.yaml
 ```
-安装kube-controller-manager
+等待kubeadm 执行完成，将master1节点上/etc/kubernetes/pki/{ca.pem,ca-key.pem,client.pem,client-key.pem,ca-config.json}下的秘钥信息拷贝到其他的master节点的相同目录下，以及config.yaml文件也一并复制，同样执行：
 ```
-cat <<EOF>/usr/lib/systemd/system/kube-controller-manager.service
-[Unit]
-Description=Kubernetes Controller Manager
-Documentation=https://github.com/GoogleCloudPlatform/kubernetes
-[Service]
-ExecStart=/usr/local/bin/kube-controller-manager \
-  --address=0.0.0.0 \
-  --master=http://127.0.0.1:8080 \
-  --allocate-node-cidrs=true \
-  --service-cluster-ip-range=10.221.0.0/16 \
-  --cluster-cidr=10.222.0.0/16 \
-  --cluster-name=kubernetes \
-  --cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem \
-  --cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem \
-  --service-account-private-key-file=/etc/kubernetes/ssl/ca-key.pem \
-  --root-ca-file=/etc/kubernetes/ssl/ca.pem \
-  --leader-elect=true \
-  --v=2
-Restart=on-failure
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload && systemctl start kube-controller-manager && systemctl status kube-controller-manager
+kubeadm init --config=config.yaml
 ```
-安装kube-scheduler
-```
-cat <<EOF> /usr/lib/systemd/system/kube-scheduler.service
-[Unit]
-Description=Kubernetes Scheduler
-Documentation=https://github.com/GoogleCloudPlatform/kubernetes
-[Service]
-ExecStart=/usr/local/bin/kube-scheduler \
-  --address=0.0.0.0 \
-  --master=http://127.0.0.1:8080 \
-  --leader-elect=true \
-  --v=2
-Restart=on-failure
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload && systemctl start kube-scheduler && systemctl status kube-scheduler
-```
+
 #### 六、Master HA配置
 目前所谓的kubernetes HA 其实主要是API Server的HA，master上的其他组件，比如kube-controller-manager、kube-scheduler都是通过etcd做选举。而API Server一般有两种方式做HA；一种是多个API Server 做聚合为 VIP，另一种使用nginx反向代理，这里我们采用nginx的方式。
 
